@@ -21,6 +21,18 @@ AMAZON_MARKETPLACE = AMAZON_MARKETPLACE.replace("https://", "").rstrip("/")
 def amazon_search_url(query: str) -> str:
     return f"https://{AMAZON_MARKETPLACE}/s?k={quote_plus(query.strip())}"
 
+
+def amazon_query_for_matches(query: str, products: list[dict]) -> str:
+    """Use the matched product identity, not the full visual caption, for Amazon."""
+    if not products:
+        return query.strip()
+    product = products[0]
+    name = str(product.get("model") or product.get("name") or query).strip()
+    brand = str(product.get("brand", "")).strip()
+    if brand and brand.lower() not in name.lower():
+        return f"{brand} {name}"
+    return name
+
 st.set_page_config(
     page_title="ShopLens | Multimodal product assistant",
     page_icon="🛍️",
@@ -155,7 +167,8 @@ for message in st.session_state.messages:
             st.markdown("#### Matching products")
             render_product_cards(message["products"])
         if message.get("amazon_search_url"):
-            st.link_button("Search these on Amazon ↗", message["amazon_search_url"])
+            label = message.get("amazon_search_query", "these products")
+            st.link_button(f"Search {label} on Amazon India ↗", message["amazon_search_url"])
 
 
 query_text = st.chat_input("Ask for products, compare items, or describe what you need…")
@@ -223,14 +236,15 @@ if should_search:
         elif sort_by == "Rating":
             matches.sort(key=lambda match: float(match.product.get("rating", 0)), reverse=True)
 
+        matched_products = product_dicts(matches)
+        amazon_query = amazon_query_for_matches(query, matched_products)
         st.session_state.messages.append(
             {
                 "role": "assistant",
                 "content": answer,
-                "products": product_dicts(matches),
-                "amazon_search_url": amazon_search_url(
-                    " ".join(part for part in (query, image_description) if part)
-                ),
+                "products": matched_products,
+                "amazon_search_query": amazon_query,
+                "amazon_search_url": amazon_search_url(amazon_query),
             }
         )
         st.rerun()
