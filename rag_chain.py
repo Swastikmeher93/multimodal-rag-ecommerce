@@ -267,9 +267,16 @@ class MultimodalSearchEngine:
             if image_description and product.get("image_url"):
                 metadata_score += 0.1
 
+            # A stale index can return a semantically broad result with weak
+            # catalog-token overlap. Tie vector influence to lexical evidence
+            # so an exact product newly added to products.json can still win
+            # until the index is rebuilt.
+            effective_vector_score = vector_score * (
+                0.20 + (0.80 * lexical_score)
+            )
             final_score = (
-                (0.60 * vector_score)
-                + (0.30 * lexical_score)
+                (0.45 * effective_vector_score)
+                + (0.45 * lexical_score)
                 + (0.10 * metadata_score)
             )
             matches.append(

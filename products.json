@@ -131,5 +131,24 @@
     "stock_status": "In stock",
     "image_url": "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=700",
     "product_url": "https://www.amazon.com/s?k=heavyweight+white+relaxed+crew+neck+t-shirt"
+  },
+  {
+    "id": "p8",
+    "name": "MacBook Air 13-inch Laptop",
+    "brand": "Apple",
+    "description": "Thin and lightweight 13-inch laptop with a silver aluminum design, high-resolution display, and all-day battery life for work, study, and travel.",
+    "price": 999.0,
+    "currency": "USD",
+    "category": "electronics",
+    "material": "Aluminum",
+    "colors": ["silver", "midnight", "starlight"],
+    "sizes": ["13-inch"],
+    "tags": ["laptop", "macbook", "macbook air", "apple", "ultrabook", "portable", "computer"],
+    "rating": 4.8,
+    "review_count": 5432,
+    "in_stock": true,
+    "stock_status": "In stock",
+    "image_url": "https://images.unsplash.com/photo-1517336714739-489689fd1ca8?w=700",
+    "product_url": "https://www.amazon.in/s?k=MacBook+Air+13-inch+Laptop"
   }
 ]

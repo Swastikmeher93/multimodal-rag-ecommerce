@@ -14,7 +14,7 @@ from rag_chain import (
 
 load_dotenv()
 
-AMAZON_MARKETPLACE = os.getenv("AMAZON_MARKETPLACE", "www.amazon.com").strip()
+AMAZON_MARKETPLACE = os.getenv("AMAZON_MARKETPLACE", "www.amazon.in").strip()
 AMAZON_MARKETPLACE = AMAZON_MARKETPLACE.replace("https://", "").rstrip("/")
 
 
@@ -55,9 +55,8 @@ def render_product_cards(products: list[dict]) -> None:
                 colors = product.get("colors", [])
                 if colors:
                     st.write(f"Colors: {', '.join(colors)}")
-                product_url = product.get("product_url")
-                if product_url:
-                    st.markdown(f"[View product ↗]({product_url})")
+                product_url = amazon_search_url(product.get("name", "product"))
+                st.markdown(f"[View on Amazon India ↗]({product_url})")
 
 
 def product_dicts(matches: list[ProductMatch]) -> list[dict]:
@@ -104,6 +103,8 @@ with st.sidebar:
         type=["png", "jpg", "jpeg", "webp"],
         help="Upload an image, then click Search image or ask a question below.",
     )
+    if uploaded_image is not None:
+        st.image(uploaded_image, caption="Uploaded image", use_container_width=True)
     search_image = st.button(
         "Search image",
         type="primary",
@@ -117,6 +118,12 @@ with st.sidebar:
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
+        if message.get("image_bytes"):
+            st.image(
+                message["image_bytes"],
+                caption="Uploaded product image",
+                width=260,
+            )
         st.markdown(message["content"])
         if message["role"] == "assistant" and message.get("products"):
             st.markdown("#### Matching products")
@@ -179,6 +186,7 @@ if should_search:
                 price_note = f"from ${query_min_price:.2f}"
             user_content += f"\n\n_Price constraint applied: {price_note}_"
         st.session_state.messages.append({"role": "user", "content": user_content})
+        st.session_state.messages[-1]["image_bytes"] = image_bytes
 
         if sort_by == "Price: low to high":
             matches.sort(key=lambda match: float(match.product.get("price", 0)))
