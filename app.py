@@ -9,6 +9,7 @@ from rag_chain import (
     SearchFilters,
     build_search_engine,
     caption_image,
+    extract_price_constraints,
 )
 
 load_dotenv()
@@ -168,6 +169,15 @@ if should_search:
             user_content = f"{query}\n\n_Visual description: {image_description}_"
         else:
             user_content = query
+        query_min_price, query_max_price = extract_price_constraints(query)
+        if query_min_price is not None or query_max_price is not None:
+            if query_min_price is not None and query_max_price is not None:
+                price_note = f"${query_min_price:.2f}–${query_max_price:.2f}"
+            elif query_max_price is not None:
+                price_note = f"up to ${query_max_price:.2f}"
+            else:
+                price_note = f"from ${query_min_price:.2f}"
+            user_content += f"\n\n_Price constraint applied: {price_note}_"
         st.session_state.messages.append({"role": "user", "content": user_content})
 
         if sort_by == "Price: low to high":

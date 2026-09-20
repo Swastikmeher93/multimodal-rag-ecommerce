@@ -53,6 +53,7 @@ STOP_WORDS = {
     "a", "an", "and", "for", "from", "i", "in", "is", "me", "of",
     "on", "or", "please", "show", "the", "to", "with",
 }
+PRICE_NUMBER = r"(?:[$₹€£]\s*)?\d+(?:,\d{3})*(?:\.\d+)?"
 
 
 def _tokens(value: str) -> set[str]:
@@ -61,6 +62,61 @@ def _tokens(value: str) -> set[str]:
         for token in re.findall(r"[a-z0-9]+", value.lower())
         if token not in STOP_WORDS and len(token) > 1
     }
+
+
+def _number_value(value: str) -> float:
+    return float(re.sub(r"[^0-9.]", "", value))
+
+
+def extract_price_constraints(query: str) -> tuple[float | None, float | None]:
+    """Extract a natural-language price range from a shopping request.
+
+    Examples:
+    - ``under $30`` -> ``(None, 30)``
+    - ``between $20 and $40`` -> ``(20, 40)``
+    - ``around $25`` -> approximately ``(20, 30)``
+    """
+    text = query.lower().replace(",", "")
+
+    range_match = re.search(
+        rf"(?:between|from)\s*({PRICE_NUMBER})\s*(?:and|to|-)\s*({PRICE_NUMBER})",
+        text,
+    )
+    if not range_match:
+        range_match = re.search(
+            rf"({PRICE_NUMBER})\s*(?:to|-)\s*({PRICE_NUMBER})", text
+        )
+    if range_match:
+        first = _number_value(range_match.group(1))
+        second = _number_value(range_match.group(2))
+        return min(first, second), max(first, second)
+
+    max_match = re.search(
+        rf"(?:under|below|less than|up to|upto|no more than|max(?:imum)?)\s*({PRICE_NUMBER})",
+        text,
+    )
+    min_match = re.search(
+        rf"(?:over|above|more than|at least|min(?:imum)?)\s*({PRICE_NUMBER})",
+        text,
+    )
+    if max_match or min_match:
+        return (
+            _number_value(min_match.group(1)) if min_match else None,
+            _number_value(max_match.group(1)) if max_match else None,
+        )
+
+    target_match = re.search(
+        rf"(?:around|about|near|price\s*(?:of|is|=|:)?|budget\s*(?:of|is|=|:)?)\s*({PRICE_NUMBER})",
+        text,
+    )
+    if not target_match:
+        # A currency-marked number by itself usually means "in this price".
+        target_match = re.search(rf"([$₹€£]\s*{PRICE_NUMBER})", text)
+    if target_match:
+        target = _number_value(target_match.group(1))
+        return max(0.0, target * 0.8), target * 1.2
+
+    return None, None
 
 
 def _content_text(value: Any) -> str:
@@ -157,6 +213,32 @@ class MultimodalSearchEngine:
         fused_query = " ".join(query_parts).strip()
         if not fused_query:
             return []
+
+        query_min_price, query_max_price = extract_price_constraints(fused_query)
+        if filters is None:
+            filters = SearchFilters(
+                min_price=query_min_price,
+                max_price=query_max_price,
+            )
+        else:
+            filters = SearchFilters(
+                category=filters.category,
+                min_price=max(
+                    value
+                    for value in (filters.min_price, query_min_price)
+                    if value is not None
+                )
+                if filters.min_price is not None or query_min_price is not None
+                else None,
+                max_price=min(
+                    value
+                    for value in (filters.max_price, query_max_price)
+                    if value is not None
+                )
+                if filters.max_price is not None or query_max_price is not None
+                else None,
+                in_stock_only=filters.in_stock_only,
+            )
 
         result_count = k or self.default_k
         candidate_count = max(result_count * 4, 12)
