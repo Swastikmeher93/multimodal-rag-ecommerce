@@ -1,3 +1,6 @@
+import os
+from urllib.parse import quote_plus
+
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -9,6 +12,13 @@ from rag_chain import (
 )
 
 load_dotenv()
+
+AMAZON_MARKETPLACE = os.getenv("AMAZON_MARKETPLACE", "www.amazon.com").strip()
+AMAZON_MARKETPLACE = AMAZON_MARKETPLACE.replace("https://", "").rstrip("/")
+
+
+def amazon_search_url(query: str) -> str:
+    return f"https://{AMAZON_MARKETPLACE}/s?k={quote_plus(query.strip())}"
 
 st.set_page_config(
     page_title="ShopLens | Multimodal product assistant",
@@ -110,6 +120,8 @@ for message in st.session_state.messages:
         if message["role"] == "assistant" and message.get("products"):
             st.markdown("#### Matching products")
             render_product_cards(message["products"])
+        if message.get("amazon_search_url"):
+            st.link_button("Search these on Amazon ↗", message["amazon_search_url"])
 
 
 query_text = st.chat_input("Ask for products, compare items, or describe what you need…")
@@ -168,6 +180,9 @@ if should_search:
                 "role": "assistant",
                 "content": answer,
                 "products": product_dicts(matches),
+                "amazon_search_url": amazon_search_url(
+                    " ".join(part for part in (query, image_description) if part)
+                ),
             }
         )
         st.rerun()

@@ -63,7 +63,9 @@ streamlit run app.py
 ```
 It opens at http://localhost:8501. Start a conversation, upload a product photo
 in the sidebar, or combine both. Use the sidebar to filter by category, price,
-and stock status.
+and stock status. Each search also has a plain Amazon keyword-search button;
+it opens Amazon's `/s?k=...` results page and does not use affiliate tags or
+fetch Amazon results into the app.
 
 ## Swapping in your own catalog
 Replace the entries in `products.json` with your real products and re-run
