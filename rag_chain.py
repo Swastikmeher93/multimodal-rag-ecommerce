@@ -201,6 +201,31 @@ class MultimodalSearchEngine:
             )
             seen_ids.add(product_id)
 
+        # Keep catalog search useful when products were added after the last
+        # FAISS build. These lexical candidates are also a safety net for
+        # exact attributes such as "white", "crew neck", or "oversized".
+        for product in self.catalog:
+            product_id = str(product.get("id", ""))
+            if product_id in seen_ids or not _product_matches_filters(product, filters):
+                continue
+            product_tokens = _tokens(product_text(product))
+            lexical_score = len(query_tokens & product_tokens) / max(
+                len(query_tokens), 1
+            )
+            if lexical_score <= 0:
+                continue
+            metadata_score = 0.1 if product.get("in_stock") else 0.0
+            matches.append(
+                ProductMatch(
+                    product=product,
+                    vector_score=0.0,
+                    lexical_score=lexical_score,
+                    metadata_score=metadata_score,
+                    final_score=(0.40 * lexical_score) + (0.10 * metadata_score),
+                )
+            )
+            seen_ids.add(product_id)
+
         matches.sort(key=lambda item: item.final_score, reverse=True)
         return matches[:result_count]
 
@@ -209,6 +234,7 @@ class MultimodalSearchEngine:
         question: str,
         matches: list[ProductMatch],
         conversation: list[dict[str, str]] | None = None,
+        image_description: str = "",
     ) -> str:
         """Generate a concise answer using only retrieved catalog context."""
         context = format_matches(matches)
@@ -219,7 +245,9 @@ class MultimodalSearchEngine:
         prompt = f"""
 You are a helpful e-commerce shopping assistant.
 Answer the customer's question using ONLY the catalog context below.
-Never invent a product, price, stock state, rating, specification, or link.
+The application has already analyzed any uploaded image and provided its visual
+description below. Never claim that you cannot process images. Never invent a
+product, price, stock state, rating, specification, or link.
 If the catalog does not contain a suitable item, say that clearly and suggest
 which constraint the customer could relax. Mention why the top recommendations
 fit. Keep the answer conversational and concise. Product cards with exact
@@ -232,6 +260,7 @@ Catalog context:
 {context or "No products matched the active filters."}
 
 Customer question: {question}
+Visual description from the uploaded image: {image_description or "None"}
 """.strip()
         response = self.llm.invoke(prompt)
         return _content_text(response.content)

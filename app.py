@@ -141,7 +141,12 @@ if should_search:
                 filters=filters,
             )
         with st.spinner("Writing a grounded answer…"):
-            answer = engine.answer(query, matches, st.session_state.messages)
+            answer = engine.answer(
+                query,
+                matches,
+                st.session_state.messages,
+                image_description=image_description,
+            )
     except Exception as exc:  # noqa: BLE001
         st.error("I could not complete that search. Check your API key and try again.")
         with st.expander("Technical details"):

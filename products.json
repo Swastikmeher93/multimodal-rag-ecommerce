@@ -93,5 +93,43 @@
     "stock_status": "In stock",
     "image_url": "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=700",
     "product_url": "https://www.amazon.com/s?k=Compact+Mechanical+Keyboard+RGB"
+  },
+  {
+    "id": "p6",
+    "name": "Essential Oversized Cotton T-Shirt",
+    "brand": "Everyday Studio",
+    "description": "Plain white crew neck T-shirt with a relaxed oversized fit, dropped shoulders, short sleeves, and soft jersey construction.",
+    "price": 24.99,
+    "currency": "USD",
+    "category": "tops",
+    "material": "100% cotton jersey",
+    "colors": ["white", "black", "heather gray"],
+    "sizes": ["S", "M", "L", "XL", "XXL"],
+    "tags": ["t-shirt", "crew neck", "oversized", "relaxed fit", "casual", "cotton", "white"],
+    "rating": 4.5,
+    "review_count": 3187,
+    "in_stock": true,
+    "stock_status": "In stock",
+    "image_url": "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=700",
+    "product_url": "https://www.amazon.com/s?k=oversized+white+cotton+crew+neck+t-shirt"
+  },
+  {
+    "id": "p7",
+    "name": "Heavyweight Relaxed Crew T-Shirt",
+    "brand": "Common Thread",
+    "description": "Structured heavyweight jersey tee with a relaxed unisex cut, ribbed crew neck, and durable short sleeves.",
+    "price": 32.0,
+    "currency": "USD",
+    "category": "tops",
+    "material": "Heavyweight cotton jersey",
+    "colors": ["white", "washed black", "sand"],
+    "sizes": ["S", "M", "L", "XL"],
+    "tags": ["t-shirt", "crew neck", "heavyweight", "relaxed", "minimal", "casual"],
+    "rating": 4.3,
+    "review_count": 874,
+    "in_stock": true,
+    "stock_status": "In stock",
+    "image_url": "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=700",
+    "product_url": "https://www.amazon.com/s?k=heavyweight+white+relaxed+crew+neck+t-shirt"
   }
 ]
