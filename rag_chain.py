@@ -142,11 +142,20 @@ def product_text(product: dict[str, Any], image_caption: str = "") -> str:
     fields = [
         product.get("name", ""),
         product.get("brand", ""),
+        product.get("model", ""),
+        product.get("chip", ""),
+        product.get("model_year", ""),
         product.get("category", ""),
         product.get("description", ""),
         product.get("material", ""),
+        product.get("display", ""),
+        product.get("memory", ""),
+        product.get("storage", ""),
+        product.get("battery_hours", ""),
         " ".join(product.get("colors", [])),
         " ".join(product.get("tags", [])),
+        " ".join(product.get("best_for", [])),
+        " ".join(product.get("limitations", [])),
         image_caption,
     ]
     return ". ".join(str(field) for field in fields if field).strip()
@@ -246,6 +255,7 @@ class MultimodalSearchEngine:
             fused_query, k=candidate_count
         )
         query_tokens = _tokens(fused_query)
+        requested_chip_terms = set(re.findall(r"\bm\d+\b", fused_query.lower()))
         matches: list[ProductMatch] = []
         seen_ids: set[str] = set()
 
@@ -279,6 +289,9 @@ class MultimodalSearchEngine:
                 + (0.45 * lexical_score)
                 + (0.10 * metadata_score)
             )
+            product_chip_terms = _tokens(str(product.get("chip", "")))
+            if requested_chip_terms:
+                final_score += 0.35 if requested_chip_terms & product_chip_terms else -0.10
             matches.append(
                 ProductMatch(
                     product=product,
@@ -310,7 +323,15 @@ class MultimodalSearchEngine:
                     vector_score=0.0,
                     lexical_score=lexical_score,
                     metadata_score=metadata_score,
-                    final_score=(0.40 * lexical_score) + (0.10 * metadata_score),
+                    final_score=(0.40 * lexical_score)
+                    + (0.10 * metadata_score)
+                    + (
+                        0.35
+                        if requested_chip_terms
+                        and requested_chip_terms
+                        & _tokens(str(product.get("chip", "")))
+                        else -0.10 if requested_chip_terms else 0.0
+                    ),
                 )
             )
             seen_ids.add(product_id)
@@ -339,8 +360,11 @@ description below. Never claim that you cannot process images. Never invent a
 product, price, stock state, rating, specification, or link.
 If the catalog does not contain a suitable item, say that clearly and suggest
 which constraint the customer could relax. Mention why the top recommendations
-fit. Keep the answer conversational and concise. Product cards with exact
-prices and links are rendered separately by the application.
+fit. For purchase questions, give a clear verdict, explain the best use cases,
+and call out meaningful limitations or age-related trade-offs from the catalog.
+Do not turn an image description into an unsupported exact model identity.
+Keep the answer conversational and concise. Product cards with exact prices
+and links are rendered separately by the application.
 
 Recent conversation:
 {history or "No previous conversation."}
@@ -365,6 +389,10 @@ def format_matches(matches: list[ProductMatch]) -> str:
             f"category={product.get('category')} | "
             f"stock={product.get('stock_status', 'unknown')} | "
             f"rating={product.get('rating', 'unrated')} | "
+            f"chip={product.get('chip', '')} | "
+            f"specifications={product.get('display', '')}; "
+            f"{product.get('memory', '')}; {product.get('storage', '')}; "
+            f"battery={product.get('battery_hours', '')} hours | "
             f"description={product.get('description', '')} | "
             f"colors={', '.join(product.get('colors', []))} | "
             f"link={product.get('product_url', '')}"

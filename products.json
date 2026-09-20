@@ -150,5 +150,33 @@
     "stock_status": "In stock",
     "image_url": "https://images.unsplash.com/photo-1517336714739-489689fd1ca8?w=700",
     "product_url": "https://www.amazon.in/s?k=MacBook+Air+13-inch+Laptop"
+  },
+  {
+    "id": "p9",
+    "name": "MacBook Air (M1, 2020)",
+    "brand": "Apple",
+    "model": "MacBook Air (M1, 2020)",
+    "model_year": 2020,
+    "chip": "Apple M1 chip with 8-core CPU and 7-core or 8-core GPU",
+    "description": "Fanless 13.3-inch MacBook Air powered by Apple M1, designed for efficient everyday work, study, browsing, coding, video calls, and light creative work.",
+    "price": 999.0,
+    "currency": "USD",
+    "category": "electronics",
+    "material": "Aluminum",
+    "display": "13.3-inch Retina display, 2560x1600, 400 nits, P3 wide color",
+    "memory": "8GB unified memory, configurable to 16GB",
+    "storage": "128GB SSD, configurable to 256GB, 512GB, 1TB, or 2TB",
+    "battery_hours": 18,
+    "colors": ["gold", "silver", "space gray"],
+    "sizes": ["13.3-inch"],
+    "tags": ["laptop", "macbook", "macbook air", "m1", "apple silicon", "ultrabook", "portable", "computer"],
+    "best_for": ["web browsing", "office work", "students", "coding", "video calls", "light photo and video editing"],
+    "limitations": ["2020 model", "8GB base memory", "two Thunderbolt/USB 4 ports", "not ideal for sustained heavy 3D or professional video workloads"],
+    "rating": 4.7,
+    "review_count": 6842,
+    "in_stock": true,
+    "stock_status": "In stock",
+    "image_url": "https://images.unsplash.com/photo-1517336714739-489689fd1ca8?w=700",
+    "product_url": "https://www.amazon.in/s?k=Apple+MacBook+Air+M1+2020"
   }
 ]
