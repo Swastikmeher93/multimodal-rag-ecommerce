@@ -363,6 +363,9 @@ which constraint the customer could relax. Mention why the top recommendations
 fit. For purchase questions, give a clear verdict, explain the best use cases,
 and call out meaningful limitations or age-related trade-offs from the catalog.
 Do not turn an image description into an unsupported exact model identity.
+When an image is present, organize the answer as: visual analysis, best catalog
+match, verified specifications, useful features, and limitations. Clearly label
+catalog specifications as verified; do not treat visual guesses as specifications.
 Keep the answer conversational and concise. Product cards with exact prices
 and links are rendered separately by the application.
 
@@ -393,6 +396,9 @@ def format_matches(matches: list[ProductMatch]) -> str:
             f"specifications={product.get('display', '')}; "
             f"{product.get('memory', '')}; {product.get('storage', '')}; "
             f"battery={product.get('battery_hours', '')} hours | "
+            f"material={product.get('material', '')} | "
+            f"best_for={', '.join(product.get('best_for', []))} | "
+            f"limitations={', '.join(product.get('limitations', []))} | "
             f"description={product.get('description', '')} | "
             f"colors={', '.join(product.get('colors', []))} | "
             f"link={product.get('product_url', '')}"
@@ -405,7 +411,7 @@ def build_search_engine() -> MultimodalSearchEngine:
 
 
 def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-    """Describe an uploaded image in attributes useful for product retrieval."""
+    """Use Gemini Vision to extract visual attributes useful for retrieval."""
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     encoded = base64.b64encode(image_bytes).decode()
     message = {
@@ -414,9 +420,15 @@ def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
             {
                 "type": "text",
                 "text": (
-                    "Act as a visual shopping search engine. Describe the item in "
-                    "one or two sentences using category, colors, material, style, "
-                    "shape, and notable features. Do not guess a brand."
+                    "Act as a visual shopping search engine. Analyze this product "
+                    "image and return compact structured text with exactly these "
+                    "labels: Category; Visible brand or model text; Color and "
+                    "finish; Materials; Design and physical features; Visible "
+                    "specifications or ports; OCR/text on the product; Search "
+                    "keywords. Only report what is visible or reasonably inferred "
+                    "from the image. Do not invent a chip, model, price, storage, "
+                    "or performance specification. If a field is not visible, say "
+                    "unknown."
                 ),
             },
             {

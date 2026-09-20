@@ -55,6 +55,29 @@ def render_product_cards(products: list[dict]) -> None:
                 colors = product.get("colors", [])
                 if colors:
                     st.write(f"Colors: {', '.join(colors)}")
+                specification_lines = []
+                for label, key in (
+                    ("Model", "model"),
+                    ("Chip", "chip"),
+                    ("Display", "display"),
+                    ("Memory", "memory"),
+                    ("Storage", "storage"),
+                    ("Battery", "battery_hours"),
+                    ("Material", "material"),
+                ):
+                    value = product.get(key)
+                    if value:
+                        suffix = " hours" if key == "battery_hours" else ""
+                        specification_lines.append(f"**{label}:** {value}{suffix}")
+                features = product.get("best_for", [])
+                limitations = product.get("limitations", [])
+                if features:
+                    specification_lines.append(f"**Best for:** {', '.join(features)}")
+                if limitations:
+                    specification_lines.append(f"**Limitations:** {', '.join(limitations)}")
+                if specification_lines:
+                    with st.expander("Specifications and features"):
+                        st.markdown("\n\n".join(specification_lines))
                 product_url = amazon_search_url(product.get("name", "product"))
                 st.markdown(f"[View on Amazon India ↗]({product_url})")
 
