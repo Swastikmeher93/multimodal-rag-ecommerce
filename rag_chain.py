@@ -375,6 +375,14 @@ class MultimodalSearchEngine:
         query_tokens = _tokens(fused_query)
         image_tokens = _tokens(image_description)
         visual_category = _visual_category(image_description)
+        visual_category_available = bool(
+            visual_category
+            and any(
+                product.get("category") == visual_category
+                and _product_matches_filters(product, filters)
+                for product in self.catalog
+            )
+        )
         requested_chip_terms = set(re.findall(r"\bm\d+\b", fused_query.lower()))
         matches: list[ProductMatch] = []
         seen_ids: set[str] = set()
@@ -385,6 +393,12 @@ class MultimodalSearchEngine:
             if product is None or product_id in seen_ids:
                 continue
             if not _product_matches_filters(product, filters):
+                continue
+            if (
+                visual_category_available
+                and filters.category is None
+                and product.get("category") != visual_category
+            ):
                 continue
 
             searchable = product_text(product)
@@ -436,6 +450,12 @@ class MultimodalSearchEngine:
         for product in self.catalog:
             product_id = str(product.get("id", ""))
             if product_id in seen_ids or not _product_matches_filters(product, filters):
+                continue
+            if (
+                visual_category_available
+                and filters.category is None
+                and product.get("category") != visual_category
+            ):
                 continue
             product_tokens = _tokens(product_text(product))
             lexical_score = len(query_tokens & product_tokens) / max(
