@@ -1,71 +1,293 @@
-import base64
-from pathlib import Path
+"""Multimodal catalog retrieval and grounded answer generation.
 
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+The retrieval path follows the project design:
+
+1. Turn an uploaded image into a text description with Gemini Vision.
+2. Fuse the text query and image description into one retrieval query.
+3. Retrieve a broad candidate set from FAISS.
+4. Apply catalog filters and rerank with vector similarity, lexical overlap,
+   and metadata matches.
+5. Give only the reranked catalog context to the answer model.
+"""
+
+import base64
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
+load_dotenv()
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 INDEX_PATH = PROJECT_ROOT / "faiss_index"
-
-PROMPT = ChatPromptTemplate.from_template(
-    "You are a shopping assistant. Using ONLY the product context below, "
-    "answer the user's question and recommend specific products by name. "
-    "If nothing in the context fits, say so.\n\n"
-    "Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
-)
+CATALOG_PATH = PROJECT_ROOT / "products.json"
 
 
-def format_docs(docs) -> str:
-    lines = []
-    for doc in docs:
-        meta = doc.metadata
-        lines.append(f"- {meta.get('name')} (${meta.get('price')}): {doc.page_content}")
+@dataclass(frozen=True)
+class SearchFilters:
+    """User-controlled constraints applied before final reranking."""
+
+    category: str | None = None
+    min_price: float | None = None
+    max_price: float | None = None
+    in_stock_only: bool = False
+
+
+@dataclass
+class ProductMatch:
+    """A product plus transparent retrieval scores for debugging/UI use."""
+
+    product: dict[str, Any]
+    vector_score: float
+    lexical_score: float
+    metadata_score: float
+    final_score: float
+
+
+STOP_WORDS = {
+    "a", "an", "and", "for", "from", "i", "in", "is", "me", "of",
+    "on", "or", "please", "show", "the", "to", "with",
+}
+
+
+def _tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", value.lower())
+        if token not in STOP_WORDS and len(token) > 1
+    }
+
+
+def _content_text(value: Any) -> str:
+    """Normalize Gemini responses across text and content-block versions."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return " ".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in value
+        ).strip()
+    return str(value).strip()
+
+
+def load_catalog() -> list[dict[str, Any]]:
+    if not CATALOG_PATH.is_file():
+        raise FileNotFoundError(f"Product catalog not found at {CATALOG_PATH}")
+    return json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+
+
+def product_text(product: dict[str, Any], image_caption: str = "") -> str:
+    """Create the searchable representation used by the embedding index."""
+    fields = [
+        product.get("name", ""),
+        product.get("brand", ""),
+        product.get("category", ""),
+        product.get("description", ""),
+        product.get("material", ""),
+        " ".join(product.get("colors", [])),
+        " ".join(product.get("tags", [])),
+        image_caption,
+    ]
+    return ". ".join(str(field) for field in fields if field).strip()
+
+
+def _product_matches_filters(
+    product: dict[str, Any], filters: SearchFilters | None
+) -> bool:
+    if filters is None:
+        return True
+    if filters.category and product.get("category") != filters.category:
+        return False
+    price = float(product.get("price", 0))
+    if filters.min_price is not None and price < filters.min_price:
+        return False
+    if filters.max_price is not None and price > filters.max_price:
+        return False
+    if filters.in_stock_only and not product.get("in_stock", False):
+        return False
+    return True
+
+
+class MultimodalSearchEngine:
+    """Hybrid catalog search plus grounded Gemini response generation."""
+
+    def __init__(self, k: int = 6):
+        index_file = INDEX_PATH / "index.faiss"
+        metadata_file = INDEX_PATH / "index.pkl"
+        if not index_file.is_file() or not metadata_file.is_file():
+            raise FileNotFoundError(
+                f"FAISS index not found at {INDEX_PATH}. "
+                "Run `python build_index.py` from the project folder first."
+            )
+
+        self.default_k = k
+        self.catalog = load_catalog()
+        self.products_by_id = {str(item["id"]): item for item in self.catalog}
+        self.embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+        self.vectorstore = FAISS.load_local(
+            INDEX_PATH,
+            self.embeddings,
+            allow_dangerous_deserialization=True,
+        )
+        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3)
+
+    @property
+    def categories(self) -> list[str]:
+        return sorted({str(item.get("category")) for item in self.catalog})
+
+    @property
+    def price_range(self) -> tuple[float, float]:
+        prices = [float(item.get("price", 0)) for item in self.catalog]
+        return min(prices, default=0), max(prices, default=0)
+
+    def search(
+        self,
+        query: str,
+        image_description: str = "",
+        filters: SearchFilters | None = None,
+        k: int | None = None,
+    ) -> list[ProductMatch]:
+        """Retrieve, filter, and rerank products for a text/image request."""
+        query_parts = [part.strip() for part in (query, image_description) if part]
+        fused_query = " ".join(query_parts).strip()
+        if not fused_query:
+            return []
+
+        result_count = k or self.default_k
+        candidate_count = max(result_count * 4, 12)
+        candidates = self.vectorstore.similarity_search_with_score(
+            fused_query, k=candidate_count
+        )
+        query_tokens = _tokens(fused_query)
+        matches: list[ProductMatch] = []
+        seen_ids: set[str] = set()
+
+        for document, distance in candidates:
+            product_id = str(document.metadata.get("id", ""))
+            product = self.products_by_id.get(product_id)
+            if product is None or product_id in seen_ids:
+                continue
+            if not _product_matches_filters(product, filters):
+                continue
+
+            searchable = product_text(product)
+            product_tokens = _tokens(searchable)
+            lexical_score = len(query_tokens & product_tokens) / max(
+                len(query_tokens), 1
+            )
+            vector_score = 1.0 / (1.0 + max(float(distance), 0.0))
+            metadata_score = 0.1 if product.get("in_stock") else 0.0
+            if image_description and product.get("image_url"):
+                metadata_score += 0.1
+
+            final_score = (
+                (0.60 * vector_score)
+                + (0.30 * lexical_score)
+                + (0.10 * metadata_score)
+            )
+            matches.append(
+                ProductMatch(
+                    product=product,
+                    vector_score=vector_score,
+                    lexical_score=lexical_score,
+                    metadata_score=metadata_score,
+                    final_score=final_score,
+                )
+            )
+            seen_ids.add(product_id)
+
+        matches.sort(key=lambda item: item.final_score, reverse=True)
+        return matches[:result_count]
+
+    def answer(
+        self,
+        question: str,
+        matches: list[ProductMatch],
+        conversation: list[dict[str, str]] | None = None,
+    ) -> str:
+        """Generate a concise answer using only retrieved catalog context."""
+        context = format_matches(matches)
+        history = "\n".join(
+            f"{message['role']}: {message['content']}"
+            for message in (conversation or [])[-6:]
+        )
+        prompt = f"""
+You are a helpful e-commerce shopping assistant.
+Answer the customer's question using ONLY the catalog context below.
+Never invent a product, price, stock state, rating, specification, or link.
+If the catalog does not contain a suitable item, say that clearly and suggest
+which constraint the customer could relax. Mention why the top recommendations
+fit. Keep the answer conversational and concise. Product cards with exact
+prices and links are rendered separately by the application.
+
+Recent conversation:
+{history or "No previous conversation."}
+
+Catalog context:
+{context or "No products matched the active filters."}
+
+Customer question: {question}
+""".strip()
+        response = self.llm.invoke(prompt)
+        return _content_text(response.content)
+
+
+def format_matches(matches: list[ProductMatch]) -> str:
+    lines: list[str] = []
+    for rank, match in enumerate(matches, start=1):
+        product = match.product
+        lines.append(
+            f"{rank}. {product.get('name')} | "
+            f"${float(product.get('price', 0)):.2f} | "
+            f"category={product.get('category')} | "
+            f"stock={product.get('stock_status', 'unknown')} | "
+            f"rating={product.get('rating', 'unrated')} | "
+            f"description={product.get('description', '')} | "
+            f"colors={', '.join(product.get('colors', []))} | "
+            f"link={product.get('product_url', '')}"
+        )
     return "\n".join(lines)
 
 
-def load_retriever(k: int = 4):
-    index_file = INDEX_PATH / "index.faiss"
-    metadata_file = INDEX_PATH / "index.pkl"
-    if not index_file.is_file() or not metadata_file.is_file():
-        raise FileNotFoundError(
-            f"FAISS index not found at {INDEX_PATH}. "
-            "Run `python build_index.py` from the project folder first."
-        )
-
-    embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
-    vectorstore = FAISS.load_local(
-        INDEX_PATH, embeddings, allow_dangerous_deserialization=True
-    )
-    return vectorstore.as_retriever(search_kwargs={"k": k})
-
-
-def build_chain():
-    retriever = load_retriever()
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3)
-    chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | PROMPT
-        | llm
-        | StrOutputParser()
-    )
-    return chain, retriever
+def build_search_engine() -> MultimodalSearchEngine:
+    return MultimodalSearchEngine()
 
 
 def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-    """Turn an uploaded product photo into a text description for retrieval."""
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-    b64 = base64.b64encode(image_bytes).decode()
+    """Describe an uploaded image in attributes useful for product retrieval."""
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    encoded = base64.b64encode(image_bytes).decode()
     message = {
         "role": "user",
         "content": [
             {
                 "type": "text",
-                "text": "Describe this product in one or two sentences: category, color, style, notable features.",
+                "text": (
+                    "Act as a visual shopping search engine. Describe the item in "
+                    "one or two sentences using category, colors, material, style, "
+                    "shape, and notable features. Do not guess a brand."
+                ),
             },
-            {"type": "image_url", "image_url": f"data:{mime_type};base64,{b64}"},
+            {
+                "type": "image_url",
+                "image_url": f"data:{mime_type};base64,{encoded}",
+            },
         ],
     }
-    return llm.invoke([message]).content
+    return _content_text(llm.invoke([message]).content)
+
+
+# Backwards-compatible helpers for callers using the first version of this app.
+def load_retriever(k: int = 4):
+    engine = MultimodalSearchEngine(k=k)
+    return engine.vectorstore.as_retriever(search_kwargs={"k": k})
+
+
+def build_chain():
+    engine = MultimodalSearchEngine()
+    return engine.llm, engine

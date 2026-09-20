@@ -1,50 +1,168 @@
 import streamlit as st
 from dotenv import load_dotenv
 
-from rag_chain import build_chain, caption_image
+from rag_chain import (
+    ProductMatch,
+    SearchFilters,
+    build_search_engine,
+    caption_image,
+)
 
 load_dotenv()
 
-st.set_page_config(page_title="Product assistant", layout="wide")
-st.title("Multimodal product assistant")
-st.caption("Ask a question, or upload a photo of something you're looking for.")
+st.set_page_config(
+    page_title="ShopLens | Multimodal product assistant",
+    page_icon="🛍️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-if "chain" not in st.session_state:
-    with st.spinner("Loading index..."):
-        try:
-            st.session_state.chain, st.session_state.retriever = build_chain()
-        except FileNotFoundError as exc:
-            st.error(str(exc))
-            st.info("The index is built once from your product catalog and then reused by the app.")
-            st.stop()
 
-query_text = st.chat_input("Ask about a product...")
-uploaded_image = st.file_uploader("...or upload a product photo", type=["png", "jpg", "jpeg"])
+@st.cache_resource(show_spinner=False)
+def get_search_engine():
+    return build_search_engine()
 
-question = None
-if uploaded_image is not None:
-    st.image(uploaded_image, caption="Your upload", width=250)
-    with st.spinner("Looking at the image..."):
-        caption = caption_image(uploaded_image.getvalue(), mime_type=uploaded_image.type)
-    question = f"Find products similar to this: {caption}"
-elif query_text:
-    question = query_text
 
-if question:
-    with st.spinner("Searching the catalog..."):
-        docs = st.session_state.retriever.invoke(question)
-        answer = st.session_state.chain.invoke(question)
+def render_product_cards(products: list[dict]) -> None:
+    """Render grounded product metadata as Amazon-style result cards."""
+    if not products:
+        return
+    for start in range(0, len(products), 3):
+        row_products = products[start : start + 3]
+        columns = st.columns(len(row_products))
+        for column, product in zip(columns, row_products):
+            with column:
+                image_url = product.get("image_url")
+                if image_url:
+                    st.image(image_url, use_container_width=True)
+                st.markdown(f"**{product.get('name', 'Product')}**")
+                st.markdown(f"### ${float(product.get('price', 0)):.2f}")
+                rating = product.get("rating")
+                reviews = product.get("review_count", 0)
+                stock_status = product.get("stock_status", "Availability unknown")
+                st.caption(f"{rating}★ · {reviews:,} reviews · {stock_status}")
+                colors = product.get("colors", [])
+                if colors:
+                    st.write(f"Colors: {', '.join(colors)}")
+                product_url = product.get("product_url")
+                if product_url:
+                    st.markdown(f"[View product ↗]({product_url})")
 
-    st.markdown("### Answer")
-    st.write(answer)
 
-    if docs:
-        st.markdown("### Matching products")
-        cols = st.columns(len(docs))
-        for col, doc in zip(cols, docs):
-            meta = doc.metadata
-            with col:
-                if meta.get("image_url"):
-                    st.image(meta["image_url"], use_container_width=True)
-                st.markdown(f"**{meta.get('name')}**")
-                st.write(f"${meta.get('price')}")
+def product_dicts(matches: list[ProductMatch]) -> list[dict]:
+    return [match.product for match in matches]
+
+
+try:
+    engine = get_search_engine()
+except FileNotFoundError as exc:
+    st.error(str(exc))
+    st.info("Run `python build_index.py` once from the project folder, then reload.")
+    st.stop()
+except Exception as exc:  # noqa: BLE001
+    st.error("The shopping engine could not start.")
+    st.info("Check that GOOGLE_API_KEY is set in .env and reload the app.")
+    with st.expander("Technical details"):
+        st.exception(exc)
+    st.stop()
+
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+st.title("ShopLens")
+st.caption("ChatGPT-style shopping help with Google Lens-style image search and catalog results.")
+
+with st.sidebar:
+    st.header("Search controls")
+    category = st.selectbox("Category", ["All categories", *engine.categories])
+    catalog_min, catalog_max = engine.price_range
+    price_range = st.slider(
+        "Price range",
+        min_value=float(catalog_min),
+        max_value=float(catalog_max),
+        value=(float(catalog_min), float(catalog_max)),
+        step=1.0,
+        format="$%.0f",
+    )
+    in_stock_only = st.checkbox("In-stock products only", value=True)
+    sort_by = st.selectbox("Sort results", ["Relevance", "Price: low to high", "Rating"])
+    st.divider()
+    uploaded_image = st.file_uploader(
+        "Search with a product image",
+        type=["png", "jpg", "jpeg", "webp"],
+        help="Upload an image, then click Search image or ask a question below.",
+    )
+    search_image = st.button(
+        "Search image",
+        type="primary",
+        use_container_width=True,
+        disabled=uploaded_image is None,
+    )
+    if st.button("Clear conversation", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if message["role"] == "assistant" and message.get("products"):
+            st.markdown("#### Matching products")
+            render_product_cards(message["products"])
+
+
+query_text = st.chat_input("Ask for products, compare items, or describe what you need…")
+should_search = bool(query_text and query_text.strip()) or search_image
+
+if should_search:
+    query = query_text.strip() if query_text else "Find products similar to the uploaded image."
+    image_description = ""
+    image_bytes = uploaded_image.getvalue() if uploaded_image else None
+
+    try:
+        if image_bytes:
+            with st.spinner("Understanding the image…"):
+                image_description = caption_image(
+                    image_bytes,
+                    mime_type=uploaded_image.type or "image/jpeg",
+                )
+
+        filters = SearchFilters(
+            category=None if category == "All categories" else category,
+            min_price=price_range[0] if price_range[0] > catalog_min else None,
+            max_price=price_range[1] if price_range[1] < catalog_max else None,
+            in_stock_only=in_stock_only,
+        )
+        with st.spinner("Searching and reranking the catalog…"):
+            matches = engine.search(
+                query=query,
+                image_description=image_description,
+                filters=filters,
+            )
+        with st.spinner("Writing a grounded answer…"):
+            answer = engine.answer(query, matches, st.session_state.messages)
+    except Exception as exc:  # noqa: BLE001
+        st.error("I could not complete that search. Check your API key and try again.")
+        with st.expander("Technical details"):
+            st.exception(exc)
+    else:
+        if image_description:
+            user_content = f"{query}\n\n_Visual description: {image_description}_"
+        else:
+            user_content = query
+        st.session_state.messages.append({"role": "user", "content": user_content})
+
+        if sort_by == "Price: low to high":
+            matches.sort(key=lambda match: float(match.product.get("price", 0)))
+        elif sort_by == "Rating":
+            matches.sort(key=lambda match: float(match.product.get("rating", 0)), reverse=True)
+
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": answer,
+                "products": product_dicts(matches),
+            }
+        )
+        st.rerun()

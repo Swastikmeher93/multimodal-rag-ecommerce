@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 
+from rag_chain import product_text
+
 load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -56,17 +58,9 @@ def main():
             print(f"  image captioning failed ({exc}), using text description only")
             caption = ""
 
-        combined_text = f"{product['name']}. {product['description']} {caption}".strip()
+        combined_text = product_text(product, caption)
         texts.append(combined_text)
-        metadatas.append(
-            {
-                "id": product["id"],
-                "name": product["name"],
-                "price": product["price"],
-                "category": product["category"],
-                "image_url": product["image_url"],
-            }
-        )
+        metadatas.append({key: value for key, value in product.items()})
 
     embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
     vectorstore = FAISS.from_texts(texts, embeddings, metadatas=metadatas)
