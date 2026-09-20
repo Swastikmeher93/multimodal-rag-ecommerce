@@ -1,0 +1,42 @@
+[
+  {
+    "id": "p1",
+    "name": "Trail Runner Sneaker",
+    "description": "Lightweight mesh running shoe with cushioned sole, built for daily trail runs.",
+    "price": 89.99,
+    "category": "footwear",
+    "image_url": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400"
+  },
+  {
+    "id": "p2",
+    "name": "Classic Leather Loafer",
+    "description": "Slip-on leather loafer with a low heel, suited for business casual wear.",
+    "price": 129.0,
+    "category": "footwear",
+    "image_url": "https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=400"
+  },
+  {
+    "id": "p3",
+    "name": "Insulated Winter Parka",
+    "description": "Waterproof, insulated long parka with a fur-lined hood for sub-zero temperatures.",
+    "price": 220.0,
+    "category": "outerwear",
+    "image_url": "https://images.unsplash.com/photo-1544022613-e87ca75a784a?w=400"
+  },
+  {
+    "id": "p4",
+    "name": "Ceramic Pour-Over Coffee Set",
+    "description": "Hand-glazed ceramic dripper with matching mug, for slow pour-over brewing.",
+    "price": 42.5,
+    "category": "kitchen",
+    "image_url": "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=400"
+  },
+  {
+    "id": "p5",
+    "name": "Mechanical Keyboard - Compact",
+    "description": "75% layout hot-swappable mechanical keyboard with per-key RGB lighting.",
+    "price": 99.0,
+    "category": "electronics",
+    "image_url": "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=400"
+  }
+]
