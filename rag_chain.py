@@ -49,6 +49,109 @@ class ProductMatch:
     final_score: float
 
 
+@dataclass
+class VisualAnalysis:
+    """Lens-like evidence extracted from an uploaded product image."""
+
+    category: str = "unknown"
+    brand: str = "unknown"
+    model: str = "unknown"
+    colors: list[str] | None = None
+    materials: list[str] | None = None
+    features: list[str] | None = None
+    visible_specs: list[str] | None = None
+    ocr_text: list[str] | None = None
+    keywords: list[str] | None = None
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "colors",
+            "materials",
+            "features",
+            "visible_specs",
+            "ocr_text",
+            "keywords",
+        ):
+            if getattr(self, field_name) is None:
+                setattr(self, field_name, [])
+
+    @classmethod
+    def from_response(cls, raw: str) -> "VisualAnalysis":
+        """Parse Gemini's JSON response with a safe text fallback."""
+        cleaned = raw.replace("```json", "").replace("```", "").strip()
+        try:
+            start, end = cleaned.find("{"), cleaned.rfind("}")
+            payload = json.loads(cleaned[start : end + 1]) if start >= 0 else {}
+        except json.JSONDecodeError:
+            payload = {}
+
+        def value(key: str, default: Any = "unknown") -> Any:
+            return payload.get(key, default) if isinstance(payload, dict) else default
+
+        def list_value(key: str) -> list[str]:
+            item = value(key, [])
+            if isinstance(item, list):
+                return [str(entry).strip() for entry in item if str(entry).strip()]
+            if item:
+                return [part.strip() for part in re.split(r"[,;]", str(item)) if part.strip()]
+            return []
+
+        if not payload:
+            return cls(description=raw, keywords=sorted(_tokens(raw)))
+        return cls(
+            category=str(value("category")),
+            brand=str(value("brand")),
+            model=str(value("model")),
+            colors=list_value("colors"),
+            materials=list_value("materials"),
+            features=list_value("features"),
+            visible_specs=list_value("visible_specs"),
+            ocr_text=list_value("ocr_text"),
+            keywords=list_value("keywords"),
+            description=str(value("description", "")),
+        )
+
+    @property
+    def search_text(self) -> str:
+        parts = [
+            self.category,
+            self.brand,
+            self.model,
+            self.description,
+            " ".join(self.colors or []),
+            " ".join(self.materials or []),
+            " ".join(self.features or []),
+            " ".join(self.visible_specs or []),
+            " ".join(self.ocr_text or []),
+            " ".join(self.keywords or []),
+        ]
+        return ". ".join(part for part in parts if part and part != "unknown")
+
+    @property
+    def summary(self) -> str:
+        return (
+            f"Category: {self.category}; Brand/model: {self.brand} {self.model}; "
+            f"Colors: {', '.join(self.colors or []) or 'unknown'}; "
+            f"Features: {', '.join(self.features or []) or 'unknown'}; "
+            f"OCR: {', '.join(self.ocr_text or []) or 'none'}"
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "category": self.category,
+            "brand": self.brand,
+            "model": self.model,
+            "colors": self.colors,
+            "materials": self.materials,
+            "features": self.features,
+            "visible_specs": self.visible_specs,
+            "ocr_text": self.ocr_text,
+            "keywords": self.keywords,
+            "description": self.description,
+        }
+
+
 STOP_WORDS = {
     "a", "an", "and", "for", "from", "i", "in", "is", "me", "of",
     "on", "or", "please", "show", "the", "to", "with",
@@ -410,8 +513,8 @@ def build_search_engine() -> MultimodalSearchEngine:
     return MultimodalSearchEngine()
 
 
-def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-    """Use Gemini Vision to extract visual attributes useful for retrieval."""
+def analyze_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> VisualAnalysis:
+    """Use Gemini Vision for Lens-like visual search and OCR extraction."""
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     encoded = base64.b64encode(image_bytes).decode()
     message = {
@@ -420,15 +523,16 @@ def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
             {
                 "type": "text",
                 "text": (
-                    "Act as a visual shopping search engine. Analyze this product "
-                    "image and return compact structured text with exactly these "
-                    "labels: Category; Visible brand or model text; Color and "
-                    "finish; Materials; Design and physical features; Visible "
-                    "specifications or ports; OCR/text on the product; Search "
-                    "keywords. Only report what is visible or reasonably inferred "
-                    "from the image. Do not invent a chip, model, price, storage, "
-                    "or performance specification. If a field is not visible, say "
-                    "unknown."
+                    "Act like a visual shopping search engine. Analyze the image "
+                    "and return JSON only with these keys: category, brand, model, "
+                    "colors, materials, features, visible_specs, ocr_text, "
+                    "keywords, description. Values for the plural keys must be "
+                    "arrays of short strings. Extract visible logos, labels, model "
+                    "numbers, ports, controls, shape, finish, and distinctive "
+                    "design features. Use OCR for readable text. Only report what "
+                    "is visible or reasonably inferred from the image. Do not "
+                    "invent a chip, model, price, storage, or performance "
+                    "specification; use 'unknown' when unavailable."
                 ),
             },
             {
@@ -437,7 +541,12 @@ def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
             },
         ],
     }
-    return _content_text(llm.invoke([message]).content)
+    return VisualAnalysis.from_response(_content_text(llm.invoke([message]).content))
+
+
+def caption_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    """Backward-compatible text form of :func:`analyze_image`."""
+    return analyze_image(image_bytes, mime_type).search_text
 
 
 # Backwards-compatible helpers for callers using the first version of this app.

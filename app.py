@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 from rag_chain import (
     ProductMatch,
     SearchFilters,
+    analyze_image,
     build_search_engine,
-    caption_image,
     extract_price_constraints,
 )
 
@@ -147,6 +147,9 @@ for message in st.session_state.messages:
                 caption="Uploaded product image",
                 width=260,
             )
+        if message.get("visual_analysis"):
+            with st.expander("Visual analysis / OCR"):
+                st.json(message["visual_analysis"])
         st.markdown(message["content"])
         if message["role"] == "assistant" and message.get("products"):
             st.markdown("#### Matching products")
@@ -161,15 +164,17 @@ should_search = bool(query_text and query_text.strip()) or search_image
 if should_search:
     query = query_text.strip() if query_text else "Find products similar to the uploaded image."
     image_description = ""
+    image_analysis = None
     image_bytes = uploaded_image.getvalue() if uploaded_image else None
 
     try:
         if image_bytes:
             with st.spinner("Understanding the image…"):
-                image_description = caption_image(
+                image_analysis = analyze_image(
                     image_bytes,
                     mime_type=uploaded_image.type or "image/jpeg",
                 )
+                image_description = image_analysis.search_text
 
         filters = SearchFilters(
             category=None if category == "All categories" else category,
@@ -196,7 +201,7 @@ if should_search:
             st.exception(exc)
     else:
         if image_description:
-            user_content = f"{query}\n\n_Visual description: {image_description}_"
+            user_content = f"{query}\n\n_Visual analysis: {image_analysis.summary}_"
         else:
             user_content = query
         query_min_price, query_max_price = extract_price_constraints(query)
@@ -210,6 +215,8 @@ if should_search:
             user_content += f"\n\n_Price constraint applied: {price_note}_"
         st.session_state.messages.append({"role": "user", "content": user_content})
         st.session_state.messages[-1]["image_bytes"] = image_bytes
+        if image_analysis:
+            st.session_state.messages[-1]["visual_analysis"] = image_analysis.as_dict()
 
         if sort_by == "Price: low to high":
             matches.sort(key=lambda match: float(match.product.get("price", 0)))
