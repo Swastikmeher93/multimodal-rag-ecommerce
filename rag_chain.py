@@ -157,6 +157,13 @@ STOP_WORDS = {
     "on", "or", "please", "show", "the", "to", "with",
 }
 PRICE_NUMBER = r"(?:[$₹€£]\s*)?\d+(?:,\d{3})*(?:\.\d+)?"
+CATEGORY_ALIASES = {
+    "tops": {"top", "shirt", "t-shirt", "tee", "blouse", "apparel", "clothing", "sleeve"},
+    "footwear": {"shoe", "sneaker", "loafer", "boot", "sandal", "footwear"},
+    "outerwear": {"jacket", "coat", "parka", "outerwear", "hood", "winter"},
+    "electronics": {"laptop", "computer", "keyboard", "phone", "tablet", "monitor", "electronic"},
+    "kitchen": {"coffee", "mug", "kitchen", "dripper", "cookware"},
+}
 
 
 def _tokens(value: str) -> set[str]:
@@ -169,6 +176,14 @@ def _tokens(value: str) -> set[str]:
 
 def _number_value(value: str) -> float:
     return float(re.sub(r"[^0-9.]", "", value))
+
+
+def _visual_category(image_description: str) -> str | None:
+    image_tokens = _tokens(image_description)
+    for category, aliases in CATEGORY_ALIASES.items():
+        if image_tokens & aliases:
+            return category
+    return None
 
 
 def extract_price_constraints(query: str) -> tuple[float | None, float | None]:
@@ -358,6 +373,8 @@ class MultimodalSearchEngine:
             fused_query, k=candidate_count
         )
         query_tokens = _tokens(fused_query)
+        image_tokens = _tokens(image_description)
+        visual_category = _visual_category(image_description)
         requested_chip_terms = set(re.findall(r"\bm\d+\b", fused_query.lower()))
         matches: list[ProductMatch] = []
         seen_ids: set[str] = set()
@@ -374,6 +391,9 @@ class MultimodalSearchEngine:
             product_tokens = _tokens(searchable)
             lexical_score = len(query_tokens & product_tokens) / max(
                 len(query_tokens), 1
+            )
+            image_lexical_score = len(image_tokens & product_tokens) / max(
+                len(image_tokens), 1
             )
             vector_score = 1.0 / (1.0 + max(float(distance), 0.0))
             metadata_score = 0.1 if product.get("in_stock") else 0.0
@@ -392,6 +412,10 @@ class MultimodalSearchEngine:
                 + (0.45 * lexical_score)
                 + (0.10 * metadata_score)
             )
+            if image_description:
+                final_score += 0.25 * image_lexical_score
+                if visual_category:
+                    final_score += 0.25 if product.get("category") == visual_category else -0.20
             product_chip_terms = _tokens(str(product.get("chip", "")))
             if requested_chip_terms:
                 final_score += 0.35 if requested_chip_terms & product_chip_terms else -0.10
@@ -417,6 +441,9 @@ class MultimodalSearchEngine:
             lexical_score = len(query_tokens & product_tokens) / max(
                 len(query_tokens), 1
             )
+            image_lexical_score = len(image_tokens & product_tokens) / max(
+                len(image_tokens), 1
+            )
             if lexical_score <= 0:
                 continue
             metadata_score = 0.1 if product.get("in_stock") else 0.0
@@ -428,6 +455,12 @@ class MultimodalSearchEngine:
                     metadata_score=metadata_score,
                     final_score=(0.40 * lexical_score)
                     + (0.10 * metadata_score)
+                    + (0.25 * image_lexical_score)
+                    + (
+                        0.25
+                        if visual_category == product.get("category")
+                        else -0.20 if visual_category else 0.0
+                    )
                     + (
                         0.35
                         if requested_chip_terms
